@@ -1,9 +1,14 @@
-# for stackparser
+# -.- encoding: utf-8 -.-
+
 from codecs import *
 from HTMLParser import HTMLParser
 
+## 用來分析 <a href="..."> 的分析器
+class LinkParser(HTMLParser):
+	pass
+
 ## 堆疊型 HTML 分析器
-class HTMLStackParser2(HTMLParser):
+class HTMLStackParser(HTMLParser):
 
 	## 除錯設定
 	trace_stack = False
@@ -102,3 +107,4 @@ class HTMLStackParser2(HTMLParser):
 		if link != None:
 			if tag =="a":
 				self.links.extend(link)
+
