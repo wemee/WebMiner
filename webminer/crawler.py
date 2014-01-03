@@ -14,14 +14,11 @@ import time
 import urllib
 import urllib2
 from urllib2 import URLError
+from webminer.parser import LinkParser
 
-from webminer.parser import HTMLStackParser
-
-## 爬蟲
+## Crawler
 #
-# @todo 計時快取設計
-#
-class Crawler:
+class Crawler(object):
 	
 	# 文件狀態
 	is_html = False
@@ -39,7 +36,7 @@ class Crawler:
 	hashtool  = hashlib.new("md5")             # hash 演算法
 	ppout     = pprint.PrettyPrinter(indent=4) # 人性輸出
 	logger    = None
-	parser    = HTMLStackParser()
+	parser    = LinkParser()
 	linkstack = []
 
 	# 預設值
@@ -77,7 +74,10 @@ class Crawler:
 		# HTML 分析
 		if self.is_html == True:
 			self.logger.debug('Parsing for links')
+			self.parser.setCurrentURL(url)
 			self.parser.feed(self.body)
+			self.ppout.pprint(self.parser.inner_res)
+			#self.ppout.pprint(self.parser.cross_res)
 		else:
 			self.logger.debug('Not a HTML')
 

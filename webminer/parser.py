@@ -2,10 +2,81 @@
 
 from codecs import *
 from HTMLParser import HTMLParser
+import os.path
 
 ## 用來分析 <a href="..."> 的分析器
-class LinkParser(HTMLParser):
-	pass
+class LinkParser(HTMLParser, object):
+
+	# 原始 URL，用來計算相對路徑
+	protocol = 'http:'
+	siteurl  = 'http://www.stackoverflow.com'
+	baseurl  = 'http://www.stackoverflow.com/abc/'
+
+	# 原始連結 (所有連結去重複化)
+	links = []
+
+	# 實際連結 (忽略掉非資料連結)
+	resources = []
+
+	# 站內連結
+	inner_res = []
+
+	# 站外連結
+	cross_res = []
+
+	## 初始配置，無作用
+	def __init__(self):
+		super(LinkParser, self).__init__()
+
+	## 標籤分析
+	#  @param tag
+	#  @param attrs
+	def handle_starttag(self, tag, attrs):
+		if (tag == 'a'):
+			for (attkey, attval) in attrs:
+				if (attkey == 'href') and (attval not in self.links):
+					self.links.append(attval)
+					self.parseLink(attval)
+
+	## 重新設定目前的 URL，這個動作會重設 Parser
+	#  @param url
+	def setCurrentURL(self, url):
+		super(LinkParser, self).reset()
+
+		self.links     = []
+		self.resources = []
+		self.inner_res = []
+		self.cross_res = []
+
+		eop = url.find('//')
+		eod = url.find('/',eop+2)
+		self.protocol = url[0:eop]
+		self.siteurl  = url[0:eod]
+		self.baseurl  = os.path.dirname(url) + '/'
+
+	## 連結字串分析
+	#  @param link
+	def parseLink(self, link):
+		# 忽略掉非轉址項目
+		for prefix in ['#','about:','javascript:']:
+			if link.startswith(prefix): return
+
+		# 依連結字串開頭判別完整連結
+		if link.startswith('//'):
+			reslink = self.protocol + link
+		elif link.startswith('/'):
+			reslink = self.siteurl + link
+		elif link.find('://') > -1:
+			reslink = link
+		else:
+			reslink = self.baseurl + link
+
+		# 加入
+		self.resources.append(reslink)
+		if reslink.startswith(self.siteurl):
+			self.inner_res.append(reslink)
+		else:
+			self.cross_res.append(reslink)
 
 ## 堆疊型 HTML 分析器
 class HTMLStackParser(HTMLParser):
