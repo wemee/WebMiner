@@ -15,40 +15,47 @@ import urllib
 import urllib2
 from urllib2 import URLError
 from webminer.parser import LinkParser
+from HTMLParser import HTMLParseError
 
 ## Crawler
+#
+# @todo check charset from HTML tags <html charset="..."> <meta http-equiv="..."> <meta charset="...">
 #
 class Crawler(object):
 	
 	# 文件狀態
 	is_html = False
-	is_utf8 = True
+	charset = 'utf-8'
 	body    = ''
 	header  = {}
 
 	# 流程狀態
 	url     = ''      # 目前的 URL
 	load_ok = False   # 載入狀況
+	depth   = 0       # 目前深度
+	count   = 0       # 目前造訪次數
 	cache_body   = '' # body 快取檔
 	cache_header = '' # header 快取檔
+	visited_urls = [] # 已拜訪路徑
 
 	# 工具物件
 	hashtool  = hashlib.new("md5")             # hash 演算法
 	ppout     = pprint.PrettyPrinter(indent=4) # 人性輸出
 	logger    = None
 	parser    = LinkParser()
-	linkstack = []
 
 	# 預設值
-	CACHE_ROOT  = os.environ['HOME'] + '/.crawler'
-	CROSS_SITE  = False # 是否跨站砍站
-	VISIT_DEPTH = 2     # 拜訪深度
-	MAX_AGE     = 600   # 強制重新檢查的時間, 測試 304 的時候需要改成 0
+	CACHE_ROOT = os.environ['HOME'] + '/.crawler'
+	CROSS_SITE = False # 是否跨站砍站
+	MAX_DEPTH  = 5     # 最大拜訪深度
+	MAX_COUNT  = 100   # 最大拜訪頁數
+	MAX_AGE    = 600   # 強制重新檢查的時間, 測試 304 的時候需要改成 0
 
 	# 建構方法, 只配置 logger
 	def __init__(self):
 		self.logger = logging.getLogger('Crawler')
 		self.logger.setLevel(logging.DEBUG)
+		self.logger.setLevel(logging.INFO)
 		#formatter = Formatter("[%(asctime)s] %(levelname)s - %(name)s: %(message)s")
 		formatter = Formatter("%(levelname)s: %(message)s")
 
@@ -64,22 +71,64 @@ class Crawler(object):
 
 	# 取得資源
 	def fetch(self, url):
+		if url in self.visited_urls: return
+
+		self.depth = self.depth + 1
+		self.count = self.count + 1
+
 		self.url = url
 		self._load()
+		self.visited_urls.append(url)
+
+		branch = '| ' * (self.depth-1) + '|--'
+		self.logger.info('%s (d=%d/c=%d) %s' % (branch, self.depth, self.count, url))
 
 		if self.load_ok:
 			msg = 'Header Informations:\n' + self.ppout.pformat(self.header)
 			self.logger.debug(msg)
 
-		# HTML 分析
-		if self.is_html == True:
-			self.logger.debug('Parsing for links')
-			self.parser.setCurrentURL(url)
-			self.parser.feed(self.body)
-			self.ppout.pprint(self.parser.inner_res)
-			#self.ppout.pprint(self.parser.cross_res)
-		else:
-			self.logger.debug('Not a HTML')
+			# HTML 分析與遞迴拜訪處理
+			if (self.is_html == True) and (self.depth < self.MAX_DEPTH):
+				self.logger.debug('Parsing links in %s' % url)
+				self.logger.debug('Current depth: %d' % self.depth)
+				self.parser.setCurrentURL(url)
+
+				try:
+					# 有可能 parsing 失敗
+					self.parser.feed(self.body)
+					inner_urls = self.parser.inner_res
+
+					#if self.depth == 1:
+					#	print('before recursive call (%s)' % self.depth)
+					#	self.ppout.pprint(inner_urls)
+					#exit(0)
+
+					for nexturl in inner_urls:
+						if (self.count < self.MAX_COUNT):
+							self.fetch(nexturl)
+
+					#if self.depth == 1:
+					#	print('after recursive call (%s)' % self.depth)
+					#	self.ppout.pprint(inner_urls)
+
+				except HTMLParseError as e:
+					self.logger.error('parsing error')
+					#print(e)
+					#self.logger.error(self.header)
+					#self.logger.error(self.body)
+					#exit(0)
+					pass
+
+			else:
+				# 遞迴停止狀況
+				if (self.is_html == True):
+					self.logger.debug('Hit the max depth %s.' % self.depth)
+				else:
+					self.logger.debug('Not a HTML')
+
+		self.depth = self.depth - 1
+		if self.depth == 0:
+			print 'done!'
 
 	## 載入 URL
 	#
@@ -127,6 +176,9 @@ class Crawler(object):
 			self._loadFromCache()
 		else:
 			self._loadFromHTTP()
+
+		if self.load_ok:
+			self.body = unicode(self.body, self.charset)
 
 		end_time = time.time()
 		elapsed = end_time - beg_time
@@ -197,9 +249,6 @@ class Crawler(object):
 
 			# body 讀取/轉碼
 			self.body = f.read()
-			if not self.is_utf8:
-				# TODO: 非 utf8 轉碼, 可以用露天拍賣來測
-				pass
 
 			# 結束 HTTP 串流處理，之後是離線作業 (f 為檔案)
 			f.close()
@@ -228,7 +277,9 @@ class Crawler(object):
 				os.utime(self.cache_body, None)
 				self._loadFromCache()
 			else:
+				# e.g. 404, 500 ...
 				self.logger.error('HTTP Error: %d %s' % (e.code,e.reason))
+				self.logger.error('       URL: %s' % self.url)
 				self.load_ok = False
 
 	## 從 Cache 取得 Last-Modified, 用在 _loadFromHTTP() 的時間快取驗證
@@ -248,8 +299,15 @@ class Crawler(object):
 	#
 	def _parseType(self):
 		hval = self.header['Content-Type']
-		if hval.find("text/html") > -1:
+
+		# 分析 type
+		if hval.find('text/html') > -1:
 			self.is_html = True
 			hval = hval.lower()
-			if hval.find("utf-8") > -1:
-				self.is_utf8 = True
+
+		# 分析 charset
+		charset_offset = hval.find('charset=')
+		if charset_offset > -1:
+			self.charset = hval[charset_offset+8:len(hval)]
+		else:
+			self.charset = 'iso8859_1'

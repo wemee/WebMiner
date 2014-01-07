@@ -7,21 +7,21 @@ import os.path
 ## 用來分析 <a href="..."> 的分析器
 class LinkParser(HTMLParser, object):
 
-	# 原始 URL，用來計算相對路徑
+	# 原始 URL，用來計算相對路徑 - 由 setCurrentURL() 算出
 	protocol = 'http:'
 	siteurl  = 'http://www.stackoverflow.com'
 	baseurl  = 'http://www.stackoverflow.com/abc/'
 
-	# 原始連結 (所有連結去重複化)
+	## 原始連結 (所有連結去重複化)
 	links = []
 
-	# 實際連結 (忽略掉非資料連結)
+	## 實際連結 (忽略掉非資料連結)
 	resources = []
 
-	# 站內連結
+	## 站內連結
 	inner_res = []
 
-	# 站外連結
+	## 站外連結
 	cross_res = []
 
 	## 初始配置，無作用
@@ -51,8 +51,13 @@ class LinkParser(HTMLParser, object):
 		eop = url.find('//')
 		eod = url.find('/',eop+2)
 		self.protocol = url[0:eop]
-		self.siteurl  = url[0:eod]
-		self.baseurl  = os.path.dirname(url) + '/'
+		if eod > -1:
+			self.siteurl = url[0:eod]
+			self.baseurl = os.path.dirname(url) + '/'
+		else:
+			# e.g. http://stackoverflow.com
+			self.siteurl = url
+			self.baseurl = url + '/'
 
 	## 連結字串分析
 	#  @param link
