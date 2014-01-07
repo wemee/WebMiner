@@ -34,6 +34,10 @@ class Crawler(object):
 	load_ok = False   # 載入狀況
 	depth   = 0       # 目前深度
 	count   = 0       # 目前造訪次數
+	elapsed = 0.0     # 載入 URL 耗費時間
+	prevreq = 0.0     # 上一個 HTTP Request 的時間點, 用來執行延遲作業
+	cached  = False   # 是否使用快取
+	cache_url    = '' # url 快取檔
 	cache_body   = '' # body 快取檔
 	cache_header = '' # header 快取檔
 	visited_urls = [] # 已拜訪路徑
@@ -50,6 +54,7 @@ class Crawler(object):
 	MAX_DEPTH  = 5     # 最大拜訪深度
 	MAX_COUNT  = 100   # 最大拜訪頁數
 	MAX_AGE    = 600   # 強制重新檢查的時間, 測試 304 的時候需要改成 0
+	GET_INTV   = 3     # 每個 HTTP 造訪間隔
 
 	# 建構方法, 只配置 logger
 	def __init__(self):
@@ -81,7 +86,7 @@ class Crawler(object):
 		self.visited_urls.append(url)
 
 		branch = '| ' * (self.depth-1) + '|--'
-		self.logger.info('%s (d=%d/c=%d) %s' % (branch, self.depth, self.count, url))
+		self.logger.info('%s (d=%d/c=%d/e=%.3fs) %s' % (branch, self.depth, self.count, self.elapsed, url))
 
 		if self.load_ok:
 			msg = 'Header Informations:\n' + self.ppout.pformat(self.header)
@@ -152,48 +157,58 @@ class Crawler(object):
 			cache_name = self.hashtool.hexdigest()
 
 		cache_path = '%s/%s' % (self.CACHE_ROOT, domain)
-		self.cache_body = '%s/%s.cc' % (cache_path, cache_name)
-		self.cache_header = '%s/%s.hc' % (cache_path, cache_name)
+		self.cache_url    = '%s/%s.url' % (cache_path, cache_name)
+		self.cache_body   = '%s/%s.htm' % (cache_path, cache_name)
+		self.cache_header = '%s/%s.hdr' % (cache_path, cache_name)
 
-		# 自動產生快取路徑 
-		#
-		# TODO
+		# 自動產生快取路徑
+		# TODO:
 		# - is file / is link ...
 		# - bad privilege
 		if not os.path.isdir(cache_path):
 			os.makedirs(cache_path)
 
-		# 判別是否直接使用快取 (self.MAX_AGE     之內使用快取)
-		use_cache = False
+		# 判別是否直接使用快取 (self.MAX_AGE 之內使用快取)
+		self.cached = False
 		if os.path.isfile(self.cache_body) and os.path.isfile(self.cache_header):
 			mtime = os.path.getmtime(self.cache_body)
 			now   = time.time()
 			tdiff = now - mtime
 			if tdiff <= self.MAX_AGE:
-				use_cache = True
+				self.cached = True
 
-		if use_cache:
+		delay = 0
+
+		if self.cached:
 			self._loadFromCache()
 		else:
+			# Delay
+			if self.prevreq > 0:
+				duration = time.time() - self.prevreq
+				delay    = self.GET_INTV - duration
+				if delay > 0: time.sleep(delay)
+
+			# 載入
+			self.prevreq = time.time()
 			self._loadFromHTTP()
 
 		if self.load_ok:
 			self.body = unicode(self.body, self.charset)
 
 		end_time = time.time()
-		elapsed = end_time - beg_time
+		self.elapsed = end_time - beg_time - delay
 
 		# dump debug message
 		self.logger.debug("==================================================")
-		self.logger.debug("              URL: %s" % self.url)
+		self.logger.debug("         self.url: %s" % self.url)
 		self.logger.debug("           domain: %s" % domain)
 		self.logger.debug("              URI: %s" % uri)
 		self.logger.debug("       cache_name: %s" % cache_name)
 		self.logger.debug("       cache_path: %s" % cache_path)
 		self.logger.debug("  self.cache_body: %s" % self.cache_body)
 		self.logger.debug("self.cache_header: %s" % self.cache_header)
-		self.logger.debug("        use_cache: %s" % use_cache)
-		self.logger.debug("         duration: %f second(s)" % elapsed)
+		self.logger.debug("      self.cached: %s" % self.cached)
+		self.logger.debug("     self.elapsed: %f second(s)" % self.elapsed)
 		self.logger.debug("==================================================")
 
 	## 從 Cache 載入文件, _load() 最後階段
@@ -253,19 +268,29 @@ class Crawler(object):
 			# 結束 HTTP 串流處理，之後是離線作業 (f 為檔案)
 			f.close()
 
-			# header 暫存
-			hdump = json.dumps(self.header, sort_keys=True, indent=2)
-			f = open(self.cache_header,'w')
-			f.write(hdump)
-			f.close()
+			if self.is_html:
+				# header 暫存
+				hdump = json.dumps(self.header, sort_keys=True, indent=2)
+				f = open(self.cache_header,'w')
+				f.write(hdump)
+				f.close()
 
-			# body 暫存
-			f = open(self.cache_body,'w')
-			f.write(self.body)
-			f.close()
+				# body 暫存
+				f = open(self.cache_body,'w')
+				f.write(self.body)
+				f.close()
 
-			self.logger.debug("Load from HTTP")
-			self.load_ok = True
+				# URI 暫存，Crawler 不會用到，供 Parser 使用
+				f = open(self.cache_url,'w')
+				f.write(self.url)
+				f.close()
+
+				self.logger.debug("Load from HTTP")
+				self.load_ok = True
+			else:
+				self.logger.debug('Not HTML document')
+				self.body = ''
+				self.load_ok = False
 
 			# End of 200 OK
 
