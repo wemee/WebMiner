@@ -1,186 +1,216 @@
-# -.- encoding: utf-8 -.-
-
 from codecs import *
-from HTMLParser import HTMLParser
 import os.path
+import re
 
-## 用來分析 <a href="..."> 的分析器
+from HTMLParser import HTMLParser
+
+## Parser for <a> tag analysis
+#
 class LinkParser(HTMLParser, object):
 
-	# 原始 URL，用來計算相對路徑 - 由 setCurrentURL() 算出
-	protocol = 'http:'
-	siteurl  = 'http://www.stackoverflow.com'
-	baseurl  = 'http://www.stackoverflow.com/abc/'
+	# class members
+	ACCEPTED_PROTOCOLS = ('http:', 'https:')
 
-	## 原始連結 (所有連結去重複化)
-	links = []
-
-	## 實際連結 (忽略掉非資料連結)
-	resources = []
-
-	## 站內連結
-	inner_res = []
-
-	## 站外連結
-	cross_res = []
-
-	## 初始配置，無作用
+	## constructor
 	def __init__(self):
 		super(LinkParser, self).__init__()
 
-	## 標籤分析
+		## link info
+		self.rank  = 0
+		self.link  = '' # current link
+		self.label = '' # current label
+		self.title = ''
+		self.startpos = ()
+
+		## to determine fullpath
+		self.protocol = ''
+		self.siteurl  = ''
+		self.baseurl  = ''
+		self.fullurl  = ''
+
+		## nested buffer
+		#  (rank,link,label,title,startpos)
+		self.status_stack = []
+
+		## statistic
+		self.a_depth  = 0
+		self.sa_count = 0
+		self.ea_count = 0
+
+		## captured links (label,title,link,startpos,endpos)
+		self.links = []
+
+	## start tag analysis
 	#  @param tag
 	#  @param attrs
 	def handle_starttag(self, tag, attrs):
 		if (tag == 'a'):
-			for (attkey, attval) in attrs:
-				if (attkey == 'href') and (attval not in self.links):
-					self.links.append(attval)
-					self.parseLink(attval)
-
-	## 重新設定目前的 URL，這個動作會重設 Parser
-	#  @param url
-	def setCurrentURL(self, url):
-		super(LinkParser, self).reset()
-
-		self.links     = []
-		self.resources = []
-		self.inner_res = []
-		self.cross_res = []
-
-		eop = url.find('//')
-		eod = url.find('/',eop+2)
-		self.protocol = url[0:eop]
-		if eod > -1:
-			self.siteurl = url[0:eod]
-			self.baseurl = os.path.dirname(url) + '/'
-		else:
-			# e.g. http://stackoverflow.com
-			self.siteurl = url
-			self.baseurl = url + '/'
-
-	## 連結字串分析
-	#  @param link
-	def parseLink(self, link):
-		# 忽略掉非轉址項目
-		for prefix in ['#','about:','javascript:']:
-			if link.startswith(prefix): return
-
-		# 依連結字串開頭判別完整連結
-		if link.startswith('//'):
-			reslink = self.protocol + link
-		elif link.startswith('/'):
-			reslink = self.siteurl + link
-		elif link.find('://') > -1:
-			reslink = link
-		else:
-			reslink = self.baseurl + link
-
-		# 加入
-		self.resources.append(reslink)
-		if reslink.startswith(self.siteurl):
-			self.inner_res.append(reslink)
-		else:
-			self.cross_res.append(reslink)
-
-## 堆疊型 HTML 分析器
-class HTMLStackParser(HTMLParser):
-
-	## 除錯設定
-	trace_stack = False
-
-	## 不打入堆疊的標籤
-	tag_leaf = ["br","hr","input","meta","link","img"]
-	
-	## 需要取出連結的標籤
-	tag_withlink = ["a","img","form","link","script"]
-
-	## 標籤堆疊狀態
-	tag_stack = []
-
-	# 各類連結資源
-	links   = []
-	images  = []
-	scripts = []
-	forms   = []
-	styles  = []
-
-	## 取得屬性值
-	# @param string name
-	# @param list   attrs
-	# @return TODO
-	def get_attribute(self, name, attrs):
-		for (vname,value) in attrs:
-			if vname==name:
-				return value
-		return None
+			if self.a_depth > 0:
+				curr_status = (self.rank, self.link, self.label, self.title, self.startpos)
+				self.status_stack.append(curr_status)
 			
-	## 處理開頭標籤
-	# @param string tag 標籤
-	# @param truple attrs 屬性值
-	def handle_starttag(self, begtag, attrs):
-		# 連結檢查
-		if begtag in self.tag_withlink:
-			if begtag=="a" or begtag=="link":
-				aname = "href"
-			elif begtag=="img" or begtag=="script":
-				aname = "src"
-			elif begtag=="form":
-				aname = "action"
-			
-			link = self.get_attribute(aname,attrs)
-			self.on_link_visited(link, begtag, aname)
-		
-		# 堆疊深度分析
-		if begtag not in self.tag_leaf:
-			self.tag_stack.append(begtag)
-			self.dump_tag_stack("[+%s]" % (begtag))
+			self.rank  = self.sa_count + 1
+			self.link  = self.getAttribute(attrs,'href')
+			self.label = ''
+			self.title = ''
+			self.startpos = self.getpos()
 
-	## 處理結尾標籤
-	# @param string tag 標籤
-	def handle_endtag(self, endtag):
-		# 比對標籤對稱性
-		toptag = self.tag_stack[len(self.tag_stack)-1]
-		if toptag == endtag:
-			# 對稱處理
-			self.tag_stack.pop()
+			self.links.append(False)
+			self.a_depth  = self.a_depth  + 1
+			self.sa_count = self.sa_count + 1
 		else:
-			# 不對稱處理
-			print("!!! 偵測到不對稱標籤 <%s> </%s>" % (toptag, endtag))
+			if (self.a_depth > 0 and tag == 'img'):
+				t = self.getAttribute(attrs,'title')
+				self.appendTitle(t)
 
-		# 顯示堆疊狀態
-		if self.trace_stack:
-			self.dump_tag_stack("[-%s]" % (endtag))
+	## data analysis
+	#  @param data
+	def handle_data(self, data):
+		if self.a_depth > 0:
+			self.appendLabel(data)
 
-	## 顯示標籤堆疊
-	# @param string label 開頭記號
-	def dump_tag_stack(self, label):
-		str = ""
-		if len(self.tag_stack) > 0:
-			for tag in self.tag_stack:
-				if str != "":
-					str = str + " > "
-				str = str + tag
-		else:
-			str = "-- empty stack --"
-		str = label + " " + str
-		print(str)
+	## end tag analysis
+	#  @param tag
+	def handle_endtag(self, tag):
+		if (tag == 'a'):
+			if self.a_depth > 0:
+				# reduce space chars
+				self.label = re.sub(r'\s{2,}', ' ', self.label)
 
-	## 遇到連結
-	# 可能發生連結的屬性有下列情境
-	# - <a href="...">
-	# - <img src="...">
-	# - <form action="...">
-	# - <script src="...">
-	# - <link href="...">
+				self.links[self.rank-1] = (
+					self.label,
+					self.title,
+					self.link,
+					self.startpos,
+					self.getpos()
+				)
+
+				if self.a_depth > 1:
+					nested_label = self.label
+					nested_title = self.title
+
+					prev_status   = self.status_stack.pop()
+					self.rank     = prev_status[0]
+					self.link     = prev_status[1]
+					self.label    = prev_status[2]
+					self.title    = prev_status[3]
+					self.startpos = prev_status[4]
+
+					self.appendLabel(nested_label)
+					self.appendTitle(nested_title)
+
+				self.a_depth = self.a_depth - 1
+			else:
+				# Found </a> without <a>
+				self.a_depth = 0
+			self.ea_count = self.ea_count + 1
+
+	## append text in <a> ... </a>
+	#  @param text
+	def appendLabel(self, text):
+		text = text.strip()
+		if text != '':
+			if (self.label != '' and text[0].isalnum()):
+				self.label = self.label + ' '
+			self.label = self.label + text
+
+	## append text in <img title="..."/>
+	#  @param text
+	def appendTitle(self, text):
+		text = text.strip()
+		if (text != ''):
+			if (self.title !=''):
+				self.title = self.title + '\n'
+			self.title = self.title + text
+
+	## get attribute from a list of tuple
+	#  @param attrs the list of tuple
+	#  @param key   attribute name
+	def getAttribute(self, attrs, key):
+		for (k,v) in attrs:
+			if (k==key):
+				return v
+		return ''
+
+	## get all links that are in the same domain
 	#
-	# @param string link  連結目標
-	# @param string tag   標籤
-	# @param string aname 屬性名稱
-	def on_link_visited(self, link, tag, aname):
-		if self.trace_stack:
-			print("訪問到連結屬性: <%s %s=\"%s\"> (未實作)" % (tag, aname, link))
-		if link != None:
-			if tag =="a":
-				self.links.extend(link)
+	def getInnerLinks(self, currurl):
+		ilinks = []
 
+		if self.parseCurrentURL(currurl) != False:
+			for link in self.links:
+				fullurl = self.convertFullpath(link[2])
+				if fullurl != False and fullurl.startswith(self.siteurl):
+					ilinks.append(fullurl)
+		
+		return ilinks
+
+	## get protocol, siteurl, baseurl from an absolute URL
+	#  @param currurl current url, fullpath needed
+	def parseCurrentURL(self, currurl):
+		eop = currurl.find(':')
+		if eop != -1:
+			protocol = currurl[0:eop+1] # semicolon included
+			if protocol in self.ACCEPTED_PROTOCOLS:
+				# ignore bookmark
+				spos = currurl.find('#')
+				if spos > -1:
+					currurl = currurl[0:spos]
+
+				eod = currurl.find('/',eop+3)
+				if eod != -1:
+					# e.g. http://example.com/a/b/c
+					siteurl = currurl[0:eod]
+					baseurl = os.path.dirname(currurl) + '/'
+				elif len(currurl) > len(protocol)+2:
+					# e.g. http://example.com
+					siteurl = currurl
+					baseurl = currurl + '/'
+				else:
+					# e.g. http://
+					return False
+
+				self.protocol = protocol
+				self.siteurl  = siteurl
+				self.baseurl  = baseurl
+				self.fullurl  = currurl
+				return True
+		return False
+
+	## convert hyperlink to fullpath
+	#  @param href hyperlink
+	def convertFullpath(self, href):
+		fullpath = False
+
+		if   href.startswith('//'):
+			# e.g. //example.com
+			fullpath = self.protocol + href
+		elif href.startswith('/'):
+			# e.g. /a/b/c
+			fullpath = self.siteurl + href
+		elif href.startswith('#'):
+			# e.g. #a
+			fullpath = self.fullurl
+		else:
+			# check if protocol exists
+			semipos = href.find(':')
+			if semipos > -1:
+				# e.g. http://example.com/...
+				protocol = href[0:semipos+1]
+				if protocol in self.ACCEPTED_PROTOCOLS:
+					fullpath = href
+			else:
+				# no protocol here
+				if href != '':
+					fullpath = self.baseurl + href
+				else:
+					fullpath = self.fullurl
+
+		# ignore bookmark
+		if fullpath != False:
+			spos = fullpath.find('#')
+			if spos > -1:
+				fullpath = fullpath[0:spos]
+
+		# match nothing
+		return fullpath

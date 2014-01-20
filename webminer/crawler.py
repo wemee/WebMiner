@@ -15,6 +15,7 @@ import urllib
 import urllib2
 from urllib2 import URLError
 from webminer.parser import LinkParser
+#from webminer.parser import LinkParser2
 from HTMLParser import HTMLParseError
 
 ## Crawler
@@ -96,17 +97,20 @@ class Crawler(object):
 			if (self.is_html == True) and (self.depth < self.MAX_DEPTH):
 				self.logger.debug('Parsing links in %s' % url)
 				self.logger.debug('Current depth: %d' % self.depth)
-				self.parser.setCurrentURL(url)
+				#self.parser.setCurrentURL(url)
 
 				try:
 					# 有可能 parsing 失敗
 					self.parser.feed(self.body)
+					#print(self.parser.sa_count)
+					#print(self.parser.ea_count)
+					exit(0)
 					inner_urls = self.parser.inner_res
 
 					#if self.depth == 1:
 					#	print('before recursive call (%s)' % self.depth)
 					#	self.ppout.pprint(inner_urls)
-					#exit(0)
+					
 
 					for nexturl in inner_urls:
 						if (self.count < self.MAX_COUNT):
@@ -217,16 +221,22 @@ class Crawler(object):
 		# TODO: I/O Error
 
 		# header 載入
+		'''
 		f = open(self.cache_header,'r')
 		hdump = f.read()
 		f.close()
+		'''
+		hdump = self._loadFile(self.cache_header)
 		self.header = json.loads(hdump)
 		self._parseType()
 
 		# body 載入
+		'''
 		f = open(self.cache_body,'r')
 		self.body = f.read()
 		f.close()
+		'''
+		self.body = self._loadFile(self.cache_body)
 
 		self.logger.debug("Load from cache")
 		self.load_ok = True
@@ -271,19 +281,28 @@ class Crawler(object):
 			if self.is_html:
 				# header 暫存
 				hdump = json.dumps(self.header, sort_keys=True, indent=2)
+				'''
 				f = open(self.cache_header,'w')
 				f.write(hdump)
 				f.close()
+				'''
+				self._saveFile(self.cache_header,hdump)
 
 				# body 暫存
+				'''
 				f = open(self.cache_body,'w')
 				f.write(self.body)
 				f.close()
+				'''
+				self._saveFile(self.cache_body,self.body)
 
 				# URI 暫存，Crawler 不會用到，供 Parser 使用
+				'''
 				f = open(self.cache_url,'w')
 				f.write(self.url)
 				f.close()
+				'''
+				self._saveFile(self.cache_url,self.url)
 
 				self.logger.debug("Load from HTTP")
 				self.load_ok = True
@@ -306,6 +325,21 @@ class Crawler(object):
 				self.logger.error('HTTP Error: %d %s' % (e.code,e.reason))
 				self.logger.error('       URL: %s' % self.url)
 				self.load_ok = False
+
+	## 存檔 (以後要抽離)
+	#
+	def _saveFile(self,filename, contents):
+		f = open(filename,'w')
+		f.write(contents)
+		f.close()
+
+	## 讀檔 (以後要抽離)
+	#
+	def _loadFile(self,filename):
+		f = open(filename,'r')
+		contents = f.read()
+		f.close()
+		return contents
 
 	## 從 Cache 取得 Last-Modified, 用在 _loadFromHTTP() 的時間快取驗證
 	#
