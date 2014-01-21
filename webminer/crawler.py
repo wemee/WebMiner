@@ -15,7 +15,6 @@ import urllib
 import urllib2
 from urllib2 import URLError
 from webminer.parser import LinkParser
-#from webminer.parser import LinkParser2
 from HTMLParser import HTMLParseError
 
 ## Crawler
@@ -23,43 +22,42 @@ from HTMLParser import HTMLParseError
 # @todo check charset from HTML tags <html charset="..."> <meta http-equiv="..."> <meta charset="...">
 #
 class Crawler(object):
-	
-	# 文件狀態
-	is_html = False
-	charset = 'utf-8'
-	body    = ''
-	header  = {}
 
-	# 流程狀態
-	url     = ''      # 目前的 URL
-	load_ok = False   # 載入狀況
-	depth   = 0       # 目前深度
-	count   = 0       # 目前造訪次數
-	elapsed = 0.0     # 載入 URL 耗費時間
-	prevreq = 0.0     # 上一個 HTTP Request 的時間點, 用來執行延遲作業
-	cached  = False   # 是否使用快取
-	cache_url    = '' # url 快取檔
-	cache_body   = '' # body 快取檔
-	cache_header = '' # header 快取檔
-	visited_urls = [] # 已拜訪路徑
+	# Tools, use static member to save memory
+	hashtool = hashlib.new("md5")
+	ppout    = pprint.PrettyPrinter(indent=4)
+	logger   = logging.getLogger('Crawler')
+	parser   = LinkParser()
 
-	# 工具物件
-	hashtool  = hashlib.new("md5")             # hash 演算法
-	ppout     = pprint.PrettyPrinter(indent=4) # 人性輸出
-	logger    = None
-	parser    = LinkParser()
-
-	# 預設值
+	# Defaults
 	CACHE_ROOT = os.environ['HOME'] + '/.crawler'
-	CROSS_SITE = False # 是否跨站砍站
-	MAX_DEPTH  = 5     # 最大拜訪深度
-	MAX_COUNT  = 100   # 最大拜訪頁數
-	MAX_AGE    = 600   # 強制重新檢查的時間, 測試 304 的時候需要改成 0
-	GET_INTV   = 3     # 每個 HTTP 造訪間隔
+	CROSS_SITE = False
+	MAX_DEPTH  = 3
+	MAX_COUNT  = 100   # Max pages to download
+	MAX_AGE    = 60*60 # Duration to validate cache
+	GET_INTV   = 2     # Interval seconds between 2 requests
 
 	# 建構方法, 只配置 logger
 	def __init__(self):
-		self.logger = logging.getLogger('Crawler')
+		# 文件狀態
+		self.is_html = False
+		self.charset = 'utf-8'
+		self.body    = ''
+		self.header  = {}
+
+		# 流程狀態
+		self.url     = ''      # 目前的 URL
+		self.load_ok = False   # 載入狀況
+		self.depth   = 0       # 目前深度
+		self.count   = 0       # 目前造訪次數
+		self.elapsed = 0.0     # 載入 URL 耗費時間
+		self.cached  = False   # 是否使用快取
+		self.cache_url    = '' # url 快取檔
+		self.cache_body   = '' # body 快取檔
+		self.cache_header = '' # header 快取檔
+		self.visited_urls = [] # 已拜訪路徑
+
+		# Logging
 		self.logger.setLevel(logging.DEBUG)
 		self.logger.setLevel(logging.INFO)
 		#formatter = Formatter("[%(asctime)s] %(levelname)s - %(name)s: %(message)s")
@@ -87,7 +85,7 @@ class Crawler(object):
 		self.visited_urls.append(url)
 
 		branch = '| ' * (self.depth-1) + '|--'
-		self.logger.info('%s (d=%d/c=%d/e=%.3fs) %s' % (branch, self.depth, self.count, self.elapsed, url))
+		self.logger.info('%s (d=%d/c=%d/e=%.2fs/t=%.2fs) %s' % (branch, self.depth, self.count, self.elapsed, self.totaltime, url))
 
 		if self.load_ok:
 			msg = 'Header Informations:\n' + self.ppout.pformat(self.header)
@@ -102,32 +100,13 @@ class Crawler(object):
 				try:
 					# 有可能 parsing 失敗
 					self.parser.feed(self.body)
-					#print(self.parser.sa_count)
-					#print(self.parser.ea_count)
-					exit(0)
-					inner_urls = self.parser.inner_res
-
-					#if self.depth == 1:
-					#	print('before recursive call (%s)' % self.depth)
-					#	self.ppout.pprint(inner_urls)
-					
+					inner_urls = self.parser.getInnerLinks(url)
 
 					for nexturl in inner_urls:
 						if (self.count < self.MAX_COUNT):
 							self.fetch(nexturl)
-
-					#if self.depth == 1:
-					#	print('after recursive call (%s)' % self.depth)
-					#	self.ppout.pprint(inner_urls)
-
 				except HTMLParseError as e:
 					self.logger.error('parsing error')
-					#print(e)
-					#self.logger.error(self.header)
-					#self.logger.error(self.body)
-					#exit(0)
-					pass
-
 			else:
 				# 遞迴停止狀況
 				if (self.is_html == True):
@@ -181,26 +160,29 @@ class Crawler(object):
 			if tdiff <= self.MAX_AGE:
 				self.cached = True
 
-		delay = 0
+		delay_secs = 0
 
+		# 載入方式決定
 		if self.cached:
 			self._loadFromCache()
 		else:
-			# Delay
-			if self.prevreq > 0:
-				duration = time.time() - self.prevreq
-				delay    = self.GET_INTV - duration
-				if delay > 0: time.sleep(delay)
-
 			# 載入
-			self.prevreq = time.time()
 			self._loadFromHTTP()
+
+			# Delay
+			if self.load_ok:
+				delay_secs = self.GET_INTV - (time.time() - beg_time)
+				if delay_secs > 0:
+					time.sleep(delay_secs)
+				else:
+					delay_secs = 0
 
 		if self.load_ok:
 			self.body = unicode(self.body, self.charset)
 
 		end_time = time.time()
-		self.elapsed = end_time - beg_time - delay
+		self.totaltime = end_time - beg_time
+		self.elapsed   = self.totaltime - delay_secs
 
 		# dump debug message
 		self.logger.debug("==================================================")
@@ -221,21 +203,11 @@ class Crawler(object):
 		# TODO: I/O Error
 
 		# header 載入
-		'''
-		f = open(self.cache_header,'r')
-		hdump = f.read()
-		f.close()
-		'''
 		hdump = self._loadFile(self.cache_header)
 		self.header = json.loads(hdump)
 		self._parseType()
 
 		# body 載入
-		'''
-		f = open(self.cache_body,'r')
-		self.body = f.read()
-		f.close()
-		'''
 		self.body = self._loadFile(self.cache_body)
 
 		self.logger.debug("Load from cache")
@@ -246,7 +218,6 @@ class Crawler(object):
 	def _loadFromHTTP(self):
 		try:
 			# 使用 urllib2 存取 HTTP
-			# TODO: 加上 If-Modified-Since: 以便節省頻寬 ...
 			httpreq = urllib2.Request(self.url)
 			httpreq.add_header('User-Agent', 'Mozilla/9.9 (Shit Browser)')
 
@@ -259,9 +230,12 @@ class Crawler(object):
 
 			# 開始 HTTP 串流處理 (f 為 HTTP 連線)
 			f = urllib2.urlopen(httpreq)
-			# 只有 200 OK 才會繼續, 否則會進入 except
 
-			# header (list > dict)
+			#-----------------
+			# Begin of 200 OK
+			#-----------------
+
+			# header (list to dict)
 			self.header = {}
 			for h in f.info().headers:
 				semipos = h.find(":")
@@ -281,27 +255,12 @@ class Crawler(object):
 			if self.is_html:
 				# header 暫存
 				hdump = json.dumps(self.header, sort_keys=True, indent=2)
-				'''
-				f = open(self.cache_header,'w')
-				f.write(hdump)
-				f.close()
-				'''
 				self._saveFile(self.cache_header,hdump)
 
 				# body 暫存
-				'''
-				f = open(self.cache_body,'w')
-				f.write(self.body)
-				f.close()
-				'''
 				self._saveFile(self.cache_body,self.body)
 
 				# URI 暫存，Crawler 不會用到，供 Parser 使用
-				'''
-				f = open(self.cache_url,'w')
-				f.write(self.url)
-				f.close()
-				'''
 				self._saveFile(self.cache_url,self.url)
 
 				self.logger.debug("Load from HTTP")
@@ -311,7 +270,9 @@ class Crawler(object):
 				self.body = ''
 				self.load_ok = False
 
+			#---------------
 			# End of 200 OK
+			#---------------
 
 		except URLError as e:
 			if e.code == 304:

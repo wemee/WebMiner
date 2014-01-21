@@ -135,3 +135,11 @@ class TestLinkParser(unittest.TestCase):
 		self.assertEqual(ilinks[5],'http://example.com/f')   # 'http://example.com/f'   => 'http://example.com/f'
 		self.assertEqual(ilinks[6],'http://example.com/f/g') # 'http://example.com/f/g' => 'http://example.com/f/g'
 		self.assertEqual(ilinks[7],'http://example.com/')    # '/'                      => 'http://example.com/'
+
+class TestCrawler(unittest.TestCase):
+
+	def setUp(self):
+		pass
+
+	def test_01_simple(self):
+		self.assertEqual(1,1)

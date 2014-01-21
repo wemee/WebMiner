@@ -5,7 +5,7 @@ from webminer.crawler import Crawler
 
 try:
 	c = Crawler()
-	c.MAX_AGE = 0
+	#c.MAX_AGE = 0
 
 	# 隨便測試
 	#c.fetch('http://stackoverflow.com/users/1844300/raymond-wu')
@@ -15,9 +15,9 @@ try:
 
 	# 測試 <a> label
 	#c.fetch('http://localhost/wiki/index.php?title=%E9%A6%96%E9%A0%81')
-	#c.fetch('http://www.chinapost.com.tw/')
+	c.fetch('http://www.chinapost.com.tw/')
 	#c.fetch('http://www.economist.com/')
-	c.fetch('http://localhost/samples/a-depth2.html')
+	#c.fetch('http://localhost/samples/a-depth2.html')
 	#c.fetch('http://arshaw.com/phpti/')
 
 	# 測試 304
