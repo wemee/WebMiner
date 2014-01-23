@@ -63,6 +63,7 @@ class Crawler(object):
 		#formatter = Formatter("[%(asctime)s] %(levelname)s - %(name)s: %(message)s")
 		formatter = Formatter("%(levelname)s: %(message)s")
 
+		self.CACHE_ROOT = './'
 		# 輸出到檔案
 		handler = TimedRotatingFileHandler(self.CACHE_ROOT+'/crawler.log')
 		handler.setFormatter(formatter)
