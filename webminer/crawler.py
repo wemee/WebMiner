@@ -12,8 +12,8 @@ import pprint
 import re
 import time
 import urllib
-import urllib2
-from urllib2 import URLError
+# import urllib2
+# from urllib2 import URLError
 from webminer.parser import LinkParser
 from HTMLParser import HTMLParseError
 
@@ -116,7 +116,7 @@ class Crawler(object):
 
 		self.depth = self.depth - 1
 		if self.depth == 0:
-			print 'done!'
+			print('done!')
 
 	## 載入 URL
 	#
