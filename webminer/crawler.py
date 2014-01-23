@@ -11,11 +11,11 @@ import os.path
 import pprint
 import re
 import time
-import urllib
-# import urllib2
-# from urllib2 import URLError
+import urllib.request, urllib.parse, urllib.error
+import urllib.request, urllib.error, urllib.parse
+from urllib.error import URLError
 from webminer.parser import LinkParser
-from HTMLParser import HTMLParseError
+from html.parser import HTMLParseError
 
 ## Crawler
 #
@@ -178,7 +178,7 @@ class Crawler(object):
 					delay_secs = 0
 
 		if self.load_ok:
-			self.body = unicode(self.body, self.charset)
+			self.body = str(self.body, self.charset)
 
 		end_time = time.time()
 		self.totaltime = end_time - beg_time
@@ -218,7 +218,7 @@ class Crawler(object):
 	def _loadFromHTTP(self):
 		try:
 			# 使用 urllib2 存取 HTTP
-			httpreq = urllib2.Request(self.url)
+			httpreq = urllib.request.Request(self.url)
 			httpreq.add_header('User-Agent', 'Mozilla/9.9 (Shit Browser)')
 
 			# HTTP 快取驗證 (快取都正常才做)
@@ -229,7 +229,7 @@ class Crawler(object):
 					httpreq.add_header('If-Modified-Since', lastmod)
 
 			# 開始 HTTP 串流處理 (f 為 HTTP 連線)
-			f = urllib2.urlopen(httpreq)
+			f = urllib.request.urlopen(httpreq)
 
 			#-----------------
 			# Begin of 200 OK
@@ -310,7 +310,7 @@ class Crawler(object):
 		hdump = f.read()
 		f.close()
 		header = json.loads(hdump)
-		if header.has_key('Last-Modified'):
+		if 'Last-Modified' in header:
 			return header['Last-Modified']
 		else:
 			return None

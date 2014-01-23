@@ -2,7 +2,7 @@ from codecs import *
 import os.path
 import re
 
-from HTMLParser import HTMLParser
+from html.parser import HTMLParser
 
 ## Parser for <a> tag analysis
 #
